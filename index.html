@@ -1,0 +1,42 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>肥猴直播中心 · 更新线路测速</title>
+<style>body{font:16px/1.7 system-ui,sans-serif;background:#f8f7fb;color:#292637;margin:0;padding:24px}main{max-width:650px;margin:5vh auto;padding:28px;background:white;border-radius:18px}h1{font-size:25px;margin-top:0}button{font:inherit;background:#7250ef;border:0;border-radius:9px;padding:12px 20px;color:white;cursor:pointer}button:disabled{opacity:.6}pre{white-space:pre-wrap;background:#f3f0fd;padding:16px;border-radius:9px}small{color:#655f70}progress{width:100%;margin-top:20px}</style>
+<main><h1>更新备用线路测速</h1><p>请在下载慢的员工电脑上操作。先暂停其他安装包下载，再点击下方按钮。</p>
+<p>最多读取 2 MB 测速数据，不安装程序、不修改卡密或设置。结果只显示在本页。</p>
+<button id="start">开始测速（最多 30 秒）</button><progress id="progress" value="0" max="2097152"></progress>
+<pre id="result" aria-live="polite">尚未开始。请在 B04 员工电脑测试。</pre>
+<small>这是备用线路的小流量测试；测到速度不代表整包下载、安装或激活已通过。</small></main>
+<script>
+'use strict';
+const files=[{"name":"probe-0.bin","size":524288,"sha256":"97d348701f9f25c44683ebf8b1619c93aa4f25aa4e8cc3a4fe8ba1eed955333b"},{"name":"probe-1.bin","size":524288,"sha256":"c3635bdda406cb43d452e90ddb570805ca21a5cc709fe9ac0651d24e2b57a6d3"},{"name":"probe-2.bin","size":524288,"sha256":"8c52c8e9956125329b979d043dae037b877d335494208993b71557888db9cb05"},{"name":"probe-3.bin","size":524288,"sha256":"02d1216cced0857a5fe68fd63ff45f68bc7b5a191d2438eb855ce3173d605823"}], total=2097152;
+const button=document.getElementById('start'), result=document.getElementById('result'), progress=document.getElementById('progress');
+function rate(n,ms){const k=n/1024/(Math.max(ms,1)/1000);return k>=1024?(k/1024).toFixed(2)+' MB/秒':k.toFixed(1)+' KB/秒';}
+button.onclick=async()=>{
+ button.disabled=true;progress.value=0;
+ const control=new AbortController(), started=performance.now(), nonce=Date.now().toString(36), loaded=[0,0,0,0];
+ let done=0,timedOut=false,failure=null,elapsed=0;
+ const sum=()=>loaded.reduce((a,b)=>a+b,0);
+ const timer=setTimeout(()=>{timedOut=true;control.abort();},30000);
+ const render=setInterval(()=>{const bytes=sum();progress.value=bytes;result.textContent='测速中：'+(bytes/1024).toFixed(0)+' / 2048 KB\n平均速度：'+rate(bytes,performance.now()-started);},250);
+ try{
+  const settled=await Promise.allSettled(files.map(async(file,i)=>{
+   try{
+    const response=await fetch(file.name+'?probe='+nonce,{signal:control.signal,cache:'no-store',credentials:'omit',redirect:'error'});
+    if(!response.ok||!response.body)throw new Error('HTTP '+response.status);
+    const reader=response.body.getReader(), chunks=[];
+    for(;;){const item=await reader.read();if(item.done)break;loaded[i]+=item.value.length;if(loaded[i]>file.size)throw new Error('测速数据长度错误');chunks.push(item.value);}
+    if(loaded[i]!==file.size)throw new Error('测速数据不完整');
+    const joined=new Uint8Array(file.size);let offset=0;for(const chunk of chunks){joined.set(chunk,offset);offset+=chunk.length;}
+    const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',joined))).map(n=>n.toString(16).padStart(2,'0')).join('');
+    if(hash!==file.sha256)throw new Error('测速数据校验失败');
+    done++;
+   }catch(e){if(!failure)failure=e;control.abort();throw e;}
+  }));
+  elapsed=performance.now()-started;
+  const bytes=sum();progress.value=bytes;
+  const valid=settled.every(x=>x.status==='fulfilled')&&done===files.length&&bytes===total;
+  result.textContent=(valid?'测速完成，数据校验通过':'测速未完成：'+(timedOut?'30 秒超时':failure?.message||'连接失败'))+'\n备用线路：GitHub Pages\n已读取：'+(bytes/1024).toFixed(0)+' / 2048 KB\n平均速度：'+rate(bytes,elapsed)+'\n用时：'+(elapsed/1000).toFixed(1)+' 秒\n完成分段：'+done+' / 4\n请把这段结果发回。';
+ }finally{clearTimeout(timer);clearInterval(render);button.disabled=false;}
+};
+</script></html>
